@@ -10,3 +10,12 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+# GoLand workspace
+/.idea
+
+# telnet
+go-telnet
+
+# Others
+*.swp
