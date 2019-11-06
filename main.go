@@ -8,13 +8,42 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"path/filepath"
+	"time"
 )
 
 func main() {
-	conn, _ := net.Dial("tcp", "127.0.0.1:1230")
+
+	timeoutArg := flag.String("timeout", "10s", "timeout for connection (duration)")
+	fileName := filepath.Base(os.Args[0])
+	flag.Usage = func() {
+		fmt.Printf("usage: %s [--timeout] <host> <port>\n", fileName)
+		fmt.Printf("example1: %s 1.2.3.4 567\n", fileName)
+		fmt.Printf("example2: %s --timeout=10s 8.9.10.11 1213\n", fileName)
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+	if len(flag.Args()) < 2 {
+		flag.Usage()
+		os.Exit(2)
+	}
+	timeout, err := time.ParseDuration(*timeoutArg)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	addr := flag.Arg(0) + ":" + flag.Arg(1)
+
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := dialer.Dial("tcp", addr)
+	if err != nil {
+		log.Fatalf("Cannot connect: %v", err)
+	}
+
 	for {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Print("Text to send: ")
