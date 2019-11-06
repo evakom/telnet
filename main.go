@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -38,10 +39,10 @@ func main() {
 	}
 	addr := flag.Arg(0) + ":" + flag.Arg(1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	dialer := &net.Dialer{Timeout: time.Millisecond}
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		log.Fatalln("Cannot connect:", err)
 	}
@@ -49,14 +50,13 @@ func main() {
 	fmt.Println("Press 'Ctrl+D' for exit")
 
 	go readRoutine(ctx, conn)
-	//go writeRoutine(ctx, conn)
+	go writeRoutine(ctx, conn)
 
 	time.Sleep(10 * time.Second)
+
 	fmt.Println("Cancelling all operations... ")
-
 	cancel()
-
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second) // 0.5 second for every socket goroutine
 	fmt.Println("...canceled all operations")
 
 	fmt.Println("Closing connection... ")
@@ -64,7 +64,7 @@ func main() {
 		log.Fatalln("Error close connection:", err)
 	}
 	fmt.Println("...closed connection")
-	fmt.Println("Exit.")
+	fmt.Println("Exited.")
 }
 
 func readRoutine(ctx context.Context, conn net.Conn) {
@@ -77,7 +77,7 @@ OUTER:
 			break OUTER
 		default:
 			// set deadline for read socket - need 'select loop' continue
-			err := conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 			if err != nil {
 				log.Println(err)
 			}
@@ -86,6 +86,9 @@ OUTER:
 				if netErr, ok := err.(net.Error); ok && !netErr.Timeout() {
 					log.Println(err)
 				}
+				//if err == io.EOF {
+				//	fmt.Println("dddddddddddddddddddddddddd", err)
+				//}
 			}
 			if n == 0 {
 				break
@@ -94,6 +97,27 @@ OUTER:
 		}
 	}
 	fmt.Println("...exited from reading")
+}
+
+func writeRoutine(ctx context.Context, conn net.Conn) {
+	scanner := bufio.NewScanner(os.Stdin)
+OUTER:
+	for {
+		select {
+		case <-ctx.Done():
+			break OUTER
+		default:
+			if !scanner.Scan() {
+				break OUTER
+			}
+			str := scanner.Text()
+			log.Printf("To server %v\n", str)
+
+			conn.Write([]byte(fmt.Sprintf("%s\n", str)))
+		}
+
+	}
+	log.Printf("Finished writeRoutine")
 }
 
 //func main() {
