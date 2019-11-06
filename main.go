@@ -7,7 +7,7 @@
 package main
 
 import (
-	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -38,20 +38,62 @@ func main() {
 	}
 	addr := flag.Arg(0) + ":" + flag.Arg(1)
 
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := dialer.Dial("tcp", addr)
-	if err != nil {
-		log.Fatalf("Cannot connect: %v", err)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
-	for {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Text to send: ")
-		text, _ := reader.ReadString('\n')
-		fmt.Fprintf(conn, text+"\n")
-		message, _ := bufio.NewReader(conn).ReadString('\n')
-		fmt.Print("Message from server: " + message)
+	dialer := &net.Dialer{Timeout: time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		log.Fatalln("Cannot connect:", err)
 	}
+	fmt.Println("Connected to:", addr)
+	fmt.Println("Press 'Ctrl+D' for exit")
+
+	go readRoutine(ctx, conn)
+	//go writeRoutine(ctx, conn)
+
+	time.Sleep(10 * time.Second)
+	fmt.Println("Cancelling all operations... ")
+
+	cancel()
+
+	time.Sleep(2 * time.Second)
+	fmt.Println("...canceled all operations")
+
+	fmt.Println("Closing connection... ")
+	if err := conn.Close(); err != nil {
+		log.Fatalln("Error close connection:", err)
+	}
+	fmt.Println("...closed connection")
+	fmt.Println("Exit.")
+}
+
+func readRoutine(ctx context.Context, conn net.Conn) {
+	reply := make([]byte, 1)
+OUTER:
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("Cancel happened, exiting from reading...")
+			break OUTER
+		default:
+			// set deadline for read socket - need 'select loop' continue
+			err := conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+			if err != nil {
+				log.Println(err)
+			}
+			n, err := conn.Read(reply)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && !netErr.Timeout() {
+					log.Println(err)
+				}
+			}
+			if n == 0 {
+				break
+			}
+			fmt.Print(string(reply))
+		}
+	}
+	fmt.Println("...exited from reading")
 }
 
 //func main() {
