@@ -14,7 +14,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -52,7 +54,11 @@ func main() {
 	go readRoutine(ctx, conn)
 	go writeRoutine(ctx, conn)
 
-	time.Sleep(10 * time.Second)
+	//time.Sleep(10 * time.Second)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	sig := <-c
+	fmt.Println("Got signal:", sig)
 
 	fmt.Println("Cancelling all operations... ")
 	cancel()
@@ -73,12 +79,11 @@ OUTER:
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("Cancel happened, exiting from reading...")
+			fmt.Println("Exiting from reading, cancel happened...")
 			break OUTER
 		default:
 			// set deadline for read socket - need 'select loop' continue
-			err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-			if err != nil {
+			if err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
 				log.Println(err)
 			}
 			n, err := conn.Read(reply)
@@ -86,9 +91,6 @@ OUTER:
 				if netErr, ok := err.(net.Error); ok && !netErr.Timeout() {
 					log.Println(err)
 				}
-				//if err == io.EOF {
-				//	fmt.Println("dddddddddddddddddddddddddd", err)
-				//}
 			}
 			if n == 0 {
 				break
@@ -100,24 +102,43 @@ OUTER:
 }
 
 func writeRoutine(ctx context.Context, conn net.Conn) {
-	scanner := bufio.NewScanner(os.Stdin)
+	ch := make(chan string)
+	go func(ch chan string) {
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			s, err := reader.ReadString('\n')
+			if err != nil {
+				close(ch)
+				return
+			}
+			ch <- s
+		}
+	}(ch)
+
 OUTER:
 	for {
 		select {
 		case <-ctx.Done():
+			fmt.Println("Exiting from writing, cancel happened...")
 			break OUTER
 		default:
-			if !scanner.Scan() {
-				break OUTER
-			}
-			str := scanner.Text()
-			log.Printf("To server %v\n", str)
 
-			conn.Write([]byte(fmt.Sprintf("%s\n", str)))
+		stdinloop:
+			for {
+				select {
+				case stdin, ok := <-ch:
+					if !ok {
+						break stdinloop
+					}
+					conn.Write([]byte(fmt.Sprintf("%s", stdin)))
+				case <-time.After(500 * time.Millisecond):
+					break stdinloop
+				}
+			}
 		}
 
 	}
-	log.Printf("Finished writeRoutine")
+	fmt.Println("...exited from writing")
 }
 
 //func main() {
