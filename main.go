@@ -53,9 +53,10 @@ func main() {
 	fmt.Println("Press 'Ctrl+D or Ctrl+C' for exit")
 
 	abort := make(chan bool)
+	stdin := make(chan string)
+
 	go readRoutine(ctx, conn, abort)
-	ch := make(chan string)
-	go writeRoutine(ctx, conn, ch, abort)
+	go writeRoutine(ctx, conn, stdin, abort)
 
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -69,7 +70,6 @@ func main() {
 	cancel()
 
 	time.Sleep(1 * time.Second) // wait 0.5 second for every socket goroutine
-	close(ch)
 
 	fmt.Println("Closing connection... ")
 	if err := conn.Close(); err != nil {
@@ -112,8 +112,8 @@ OUTER:
 	fmt.Println("...exited from reading")
 }
 
-func writeRoutine(ctx context.Context, conn net.Conn, ch chan string, abort chan bool) {
-	go func(ch chan<- string) {
+func writeRoutine(ctx context.Context, conn net.Conn, stdin chan string, abort chan bool) {
+	go func(stdin chan<- string) {
 		reader := bufio.NewReader(os.Stdin)
 		for {
 			s, err := reader.ReadString('\n')
@@ -125,9 +125,9 @@ func writeRoutine(ctx context.Context, conn net.Conn, ch chan string, abort chan
 				}
 				log.Println(err)
 			}
-			ch <- s
+			stdin <- s
 		}
-	}(ch)
+	}(stdin)
 
 OUTER:
 	for {
@@ -140,7 +140,7 @@ OUTER:
 		STDIN:
 			for {
 				select {
-				case stdin, ok := <-ch:
+				case stdin, ok := <-stdin:
 					if !ok {
 						break STDIN
 					}
