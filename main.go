@@ -8,19 +8,9 @@
 package main
 
 import (
-	"bufio"
-	"context"
-	"fmt"
-	"io"
 	"log"
-	"net"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
-
-const DEADLINETIME = time.Millisecond * 500
 
 func main() {
 
@@ -34,112 +24,19 @@ func main() {
 	if err := client.dial(); err != nil {
 		log.Fatalln("Cannot connect:", err)
 	}
-	fmt.Println("Connected to:", args["addr"])
-	fmt.Println("Press 'Ctrl+D or Ctrl+C' for exit")
 
-	abort := make(chan bool)
-	stdin := make(chan string)
-
-	go readRoutine(client.ctx, client.conn, abort)
-	go writeRoutine(client.ctx, client.conn, stdin, abort)
-
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		sig := <-c
-		fmt.Println("Got signal:", sig)
-		abort <- true
-	}()
+	abort := client.readFromConn()
+	_ = client.writeToConn()
+	client.waitOSKill()
 
 	<-abort
 	client.cancel()
 
-	time.Sleep(DEADLINETIME * 2) // wait DEADLINETIME for every socket goroutine
+	time.Sleep(time.Second) // wait deadline for every socket
 
-	fmt.Println("Closing connection... ")
-	if err := client.conn.Close(); err != nil {
-		log.Fatalln("Error close connection:", err)
+	if err := client.close(); err != nil {
+		log.Fatalln("Error close client:", err)
 	}
-	fmt.Println("...closed connection")
-	fmt.Println("Exited.")
-}
-
-func readRoutine(ctx context.Context, conn net.Conn, abort chan bool) {
-	reply := make([]byte, 1)
-OUTER:
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("Exiting from reading...")
-			break OUTER
-		default:
-			// set deadline for read socket - need for 'select loop' continue
-			if err := conn.SetReadDeadline(time.Now().Add(DEADLINETIME)); err != nil {
-				log.Println(err)
-			}
-			n, err := conn.Read(reply)
-			if err != nil {
-				if err == io.EOF {
-					fmt.Println("Remote host aborted connection, exiting from reading...")
-					abort <- true
-					break OUTER
-				}
-				if netErr, ok := err.(net.Error); ok && !netErr.Timeout() {
-					log.Println(err)
-				}
-			}
-			if n == 0 {
-				break
-			}
-			fmt.Print(string(reply))
-		}
-	}
-	fmt.Println("...exited from reading")
-}
-
-func writeRoutine(ctx context.Context, conn net.Conn, stdin chan string, abort chan bool) {
-	go func(stdin chan<- string) {
-		reader := bufio.NewReader(os.Stdin)
-		for {
-			s, err := reader.ReadString('\n')
-			if err != nil {
-				if err == io.EOF {
-					fmt.Println("Ctrl+D detected, aborting...")
-					abort <- true
-					return
-				}
-				log.Println(err)
-			}
-			stdin <- s
-		}
-	}(stdin)
-
-OUTER:
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("Exiting from writing...")
-			break OUTER
-		default:
-
-		STDIN:
-			for {
-				select {
-				case stdin, ok := <-stdin:
-					if !ok {
-						break STDIN
-					}
-					if _, err := conn.Write([]byte(stdin)); err != nil {
-						log.Println(err)
-					}
-					// wait deadline for input
-				case <-time.After(DEADLINETIME):
-					break STDIN
-				}
-			}
-		}
-	}
-	fmt.Println("...exited from writing")
 }
 
 //func main() {
