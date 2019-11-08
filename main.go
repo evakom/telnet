@@ -4,59 +4,44 @@
  * Copyright (c) 2019 - Eugene Klimov
  */
 
+// Simple telnet client
 package main
 
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 )
 
+const DEADLINETIME = time.Millisecond * 500
+
 func main() {
 
-	timeoutArg := flag.String("timeout", "10s", "timeout for connection (duration)")
-	fileName := filepath.Base(os.Args[0])
-	flag.Usage = func() {
-		fmt.Printf("usage: %s [--timeout] <host> <port>\n", fileName)
-		fmt.Printf("example1: %s 1.2.3.4 567\n", fileName)
-		fmt.Printf("example2: %s --timeout=10s 8.9.10.11 1213\n", fileName)
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-	if len(flag.Args()) < 2 {
-		flag.Usage()
-		os.Exit(2)
-	}
-	timeout, err := time.ParseDuration(*timeoutArg)
+	args := getCmdArgsMap()
+	timeout, err := time.ParseDuration(args["timeout"])
 	if err != nil {
 		log.Fatalln(err)
 	}
-	addr := flag.Arg(0) + ":" + flag.Arg(1)
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	dialer := &net.Dialer{Timeout: timeout}
-	conn, err := dialer.Dial("tcp", addr)
-	if err != nil {
+	client := newClient(args["addr"], timeout)
+	if err := client.dial(); err != nil {
 		log.Fatalln("Cannot connect:", err)
 	}
-	fmt.Println("Connected to:", addr)
+	fmt.Println("Connected to:", args["addr"])
 	fmt.Println("Press 'Ctrl+D or Ctrl+C' for exit")
 
 	abort := make(chan bool)
 	stdin := make(chan string)
 
-	go readRoutine(ctx, conn, abort)
-	go writeRoutine(ctx, conn, stdin, abort)
+	go readRoutine(client.ctx, client.conn, abort)
+	go writeRoutine(client.ctx, client.conn, stdin, abort)
 
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -67,12 +52,12 @@ func main() {
 	}()
 
 	<-abort
-	cancel()
+	client.cancel()
 
-	time.Sleep(1 * time.Second) // wait 0.5 second for every socket goroutine
+	time.Sleep(DEADLINETIME * 2) // wait DEADLINETIME for every socket goroutine
 
 	fmt.Println("Closing connection... ")
-	if err := conn.Close(); err != nil {
+	if err := client.conn.Close(); err != nil {
 		log.Fatalln("Error close connection:", err)
 	}
 	fmt.Println("...closed connection")
@@ -89,7 +74,7 @@ OUTER:
 			break OUTER
 		default:
 			// set deadline for read socket - need for 'select loop' continue
-			if err := conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+			if err := conn.SetReadDeadline(time.Now().Add(DEADLINETIME)); err != nil {
 				log.Println(err)
 			}
 			n, err := conn.Read(reply)
@@ -148,7 +133,7 @@ OUTER:
 						log.Println(err)
 					}
 					// wait deadline for input
-				case <-time.After(500 * time.Millisecond):
+				case <-time.After(DEADLINETIME):
 					break STDIN
 				}
 			}
