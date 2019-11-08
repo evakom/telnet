@@ -85,6 +85,12 @@ func (c *client) writeToConn() chan bool {
 	return c.abort
 }
 
+func (c *client) readFromWriteToConn() chan bool {
+	go c.readRoutine()
+	go c.writeRoutine()
+	return c.abort
+}
+
 func (c *client) readRoutine() {
 	reply := make([]byte, 1)
 OUTER:
