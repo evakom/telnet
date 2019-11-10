@@ -19,8 +19,8 @@ import (
 	"time"
 )
 
-// DEADLINETIME constant need for waiting user for some time
-// and get some work if user "dead"
+// DEADLINETIME constant need for waiting user some time
+// and get some work if user is "dead"
 const DEADLINETIME = time.Millisecond * 500
 
 type client struct {
@@ -50,7 +50,7 @@ func (c *client) dial() error {
 	c.conn, err = dialer.Dial("tcp", c.serverAddr)
 	if err == nil {
 		log.Printf("Connected to: %s", c.serverAddr)
-		fmt.Println("Press 'Ctrl+D or Ctrl+C' for exit")
+		log.Println("Press 'Ctrl+D or Ctrl+C' for exit")
 	}
 	return err
 }
