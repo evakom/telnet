@@ -21,16 +21,20 @@ import (
 
 // DEADLINETIME constant need for waiting user some time
 // and get some work if user is "dead"
-const DEADLINETIME = time.Millisecond * 500
+const (
+	DEADLINETIME = time.Millisecond * 500
+	READBUFFER   = 1024
+)
 
 type client struct {
-	serverAddr string
-	timeout    time.Duration
-	conn       net.Conn
-	ctx        context.Context
-	cancel     context.CancelFunc
-	abortChan  chan bool
-	stdinChan  chan string
+	serverAddr  string
+	timeout     time.Duration
+	conn        net.Conn
+	ctx         context.Context
+	cancel      context.CancelFunc
+	abortChan   chan bool
+	stdinChan   chan string
+	lastMessage string
 }
 
 func newClient(serverAddr string, timeout time.Duration) client {
@@ -92,7 +96,7 @@ func (c *client) readFromWriteToConn() chan bool {
 }
 
 func (c *client) readRoutine() {
-	reply := make([]byte, 1)
+	reply := make([]byte, READBUFFER)
 OUTER:
 	for {
 		select {
@@ -118,7 +122,11 @@ OUTER:
 			if n == 0 {
 				break
 			}
-			fmt.Print(string(reply))
+			bs := reply[:n]
+			if len(bs) != 0 {
+				c.lastMessage = string(bs)
+			}
+			fmt.Printf(c.lastMessage)
 		}
 	}
 	log.Println("...exited from reading")

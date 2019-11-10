@@ -11,16 +11,25 @@ import (
 	"io"
 	"log"
 	"net"
-	"strings"
 	"testing"
 	"time"
 )
 
 const (
-	SERVERLISTEN      = "localhost:12345"
-	SERVERSTOPMESSAGE = "stopServer\n"
-	SERVERWAITSTART   = 100 * time.Millisecond
+	SERVERLISTEN       = "localhost:12346"
+	SERVERWAITSTART    = 100 * time.Millisecond
+	SERVERWAITSTOP     = 200 * time.Millisecond
+	CLIENTTIMEOUT      = 10 * time.Second
+	TESTMESSAGE        = "Привет, Otus!\n"
+	CLIENTREADTIMEOUT  = 250 * time.Millisecond
+	CLIENTCLOSETIMEOUT = 500 * time.Millisecond
 )
+
+type server struct {
+	conn net.Conn
+}
+
+//var serverOk server
 
 func init() {
 	//f, err := os.OpenFile("client_test.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -33,29 +42,91 @@ func init() {
 }
 
 func TestDialAndClose(t *testing.T) {
-	go startServer()
+	serverOk := newServer()
+	go serverOk.startServer()
 	time.Sleep(SERVERWAITSTART)
 
 	client := newClient(SERVERLISTEN, 10*time.Nanosecond)
 	if err := client.dial(); err == nil {
-		t.Fatal("Client successfully connected with small timeout 10ns but expected i/o error")
+		t.Error("Client successfully connected with small timeout 10ns but expected i/o error")
 	}
 
-	client = newClient(SERVERLISTEN, 10*time.Second)
+	client = newClient(SERVERLISTEN, CLIENTTIMEOUT)
 	if err := client.dial(); err != nil {
-		t.Fatalf("Expected successfully connected to server but got error: %s", err)
+		t.Errorf("Expected successfully connected to server but got error: %s", err)
 	}
 
 	time.Sleep(1 * time.Second)
 
 	if err := client.close(); err != nil {
-		t.Fatalf("Expected successfully closed connection to server but got error: %s", err)
+		t.Errorf("Expected successfully closed connection to server but got error: %s", err)
 	}
 
-	stopServer()
+	serverOk.stopServer()
 }
 
-func startServer() {
+func TestMessageFromServer(t *testing.T) {
+	serverOk := newServer()
+	go serverOk.startServer()
+	time.Sleep(SERVERWAITSTART)
+
+	client := newClient(SERVERLISTEN, CLIENTTIMEOUT)
+	if err := client.dial(); err != nil {
+		t.Errorf("Expected successfully connected to server but got error: %s", err)
+	}
+
+	client.readFromConn()
+	serverOk.writeString(TESTMESSAGE)
+	time.Sleep(CLIENTREADTIMEOUT)
+
+	if client.lastMessage != TESTMESSAGE {
+		t.Errorf("Test message from server no equal client received:\n"+
+			"from server - %s, expected - %s", client.lastMessage, TESTMESSAGE)
+	}
+
+	client.cancel()
+	time.Sleep(CLIENTCLOSETIMEOUT)
+	_ = client.close()
+	time.Sleep(CLIENTCLOSETIMEOUT)
+
+	serverOk.stopServer()
+}
+
+func TestDisconnectFromServer(t *testing.T) {
+	serverOk := newServer()
+	go serverOk.startServer()
+	time.Sleep(SERVERWAITSTART)
+
+	client := newClient(SERVERLISTEN, CLIENTTIMEOUT)
+	if err := client.dial(); err != nil {
+		t.Errorf("Expected successfully connected to server but got error: %s", err)
+	}
+
+	abort := client.readFromConn()
+	serverOk.stopServer()
+	time.Sleep(SERVERWAITSTOP * 3)
+
+	<-abort
+	_ = client.close()
+
+	if err := client.close(); err == nil {
+		t.Error("Expected client err for closing connection but no error returned")
+	}
+}
+
+func TestMessageToServer(t *testing.T) {
+	//t.Error()
+}
+
+func TestCtrlD(t *testing.T) {
+	//t.Error()
+}
+
+func newServer() *server {
+	return &server{}
+}
+
+func (srv *server) startServer() {
 
 	ln, err := net.Listen("tcp", SERVERLISTEN)
 	if err != nil {
@@ -63,38 +134,34 @@ func startServer() {
 	}
 	log.Println("Test server started...")
 
-	conn, err := ln.Accept()
+	srv.conn, err = ln.Accept()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	for {
-		message, err := bufio.NewReader(conn).ReadString('\n')
+		_, err := bufio.NewReader(srv.conn).ReadString('\n')
 		if err != nil && err != io.EOF {
-			log.Fatalln(err)
-		}
-		if message == SERVERSTOPMESSAGE || err == io.EOF {
+			//log.Println(err)
+			// return if closed conn, no need error
 			break
 		}
-		answer := strings.ToUpper(message)
-		if _, err = conn.Write([]byte(answer)); err != nil {
-			log.Fatalln(err)
-		}
+		//answer := strings.ToUpper(message)
+		//if _, err = srv.conn.Write([]byte(answer)); err != nil {
+		//	log.Println(err)
+		//	// return if closed conn, no need error
+		//}
 	}
-	if err := conn.Close(); err != nil {
-		log.Fatalln(err)
-	}
+}
 
+func (srv *server) stopServer() {
+	time.Sleep(SERVERWAITSTOP)
+	if err := srv.conn.Close(); err != nil {
+		log.Println(err)
+	}
 	log.Println("...test server stopped.")
 }
 
-func stopServer() {
-	dialer := &net.Dialer{}
-	conn, err := dialer.Dial("tcp", SERVERLISTEN)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	if _, err = conn.Write([]byte(SERVERSTOPMESSAGE)); err != nil {
-		log.Fatalln(err)
-	}
+func (srv *server) writeString(s string) {
+	_, _ = srv.conn.Write([]byte(s))
 }
