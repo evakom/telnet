@@ -8,7 +8,7 @@ package main
 
 import (
 	"bufio"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"strings"
@@ -19,6 +19,7 @@ import (
 const (
 	SERVERLISTEN      = "localhost:12345"
 	SERVERSTOPMESSAGE = "stopServer\n"
+	SERVERWAITSTART   = 100 * time.Millisecond
 )
 
 func init() {
@@ -27,20 +28,31 @@ func init() {
 	//	log.Fatalln(err)
 	//}
 	//log.SetOutput(f)
-	log.SetOutput(ioutil.Discard)
+	// or
+	//log.SetOutput(ioutil.Discard)
 }
 
-func TestDial(t *testing.T) {
+func TestDialAndClose(t *testing.T) {
 	go startServer()
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(SERVERWAITSTART)
 
-	client := newClient(SERVERLISTEN, 10*time.Second)
-	if err := client.dial(); err != nil {
-		log.Fatalln("Cannot connect:", err)
+	client := newClient(SERVERLISTEN, 10*time.Nanosecond)
+	if err := client.dial(); err == nil {
+		t.Fatal("Client successfully connected with small timeout 10ns but expected i/o error")
 	}
 
-	time.Sleep(10 * time.Second)
-	//stopServer()
+	client = newClient(SERVERLISTEN, 10*time.Second)
+	if err := client.dial(); err != nil {
+		t.Fatalf("Expected successfully connected to server but got error: %s", err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	if err := client.close(); err != nil {
+		t.Fatalf("Expected successfully closed connection to server but got error: %s", err)
+	}
+
+	stopServer()
 }
 
 func startServer() {
@@ -58,10 +70,10 @@ func startServer() {
 
 	for {
 		message, err := bufio.NewReader(conn).ReadString('\n')
-		if err != nil {
+		if err != nil && err != io.EOF {
 			log.Fatalln(err)
 		}
-		if message == SERVERSTOPMESSAGE {
+		if message == SERVERSTOPMESSAGE || err == io.EOF {
 			break
 		}
 		answer := strings.ToUpper(message)
@@ -76,13 +88,13 @@ func startServer() {
 	log.Println("...test server stopped.")
 }
 
-//func stopServer() {
-//	dialer := &net.Dialer{}
-//	conn, err := dialer.Dial("tcp", SERVERLISTEN)
-//	if err != nil {
-//		log.Fatalln(err)
-//	}
-//	if _, err = conn.Write([]byte(SERVERSTOPMESSAGE)); err != nil {
-//		log.Fatalln(err)
-//	}
-//}
+func stopServer() {
+	dialer := &net.Dialer{}
+	conn, err := dialer.Dial("tcp", SERVERLISTEN)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	if _, err = conn.Write([]byte(SERVERSTOPMESSAGE)); err != nil {
+		log.Fatalln(err)
+	}
+}

@@ -29,16 +29,16 @@ type client struct {
 	conn       net.Conn
 	ctx        context.Context
 	cancel     context.CancelFunc
-	abort      chan bool
-	stdin      chan string
+	abortChan  chan bool
+	stdinChan  chan string
 }
 
 func newClient(serverAddr string, timeout time.Duration) client {
 	c := client{
 		serverAddr: serverAddr,
 		timeout:    timeout,
-		abort:      make(chan bool),
-		stdin:      make(chan string),
+		abortChan:  make(chan bool),
+		stdinChan:  make(chan string),
 	}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	return c
@@ -61,7 +61,7 @@ func (c *client) waitOSKill() {
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		sig := <-ch
 		fmt.Println("\nGot signal:", sig)
-		c.abort <- true
+		c.abortChan <- true
 	}()
 }
 
@@ -77,18 +77,18 @@ func (c *client) close() error {
 
 func (c *client) readFromConn() chan bool {
 	go c.readRoutine()
-	return c.abort
+	return c.abortChan
 }
 
 func (c *client) writeToConn() chan bool {
 	go c.writeRoutine()
-	return c.abort
+	return c.abortChan
 }
 
 func (c *client) readFromWriteToConn() chan bool {
 	go c.readRoutine()
 	go c.writeRoutine()
-	return c.abort
+	return c.abortChan
 }
 
 func (c *client) readRoutine() {
@@ -108,7 +108,7 @@ OUTER:
 			if err != nil {
 				if err == io.EOF {
 					log.Println("Remote host aborted connection, exiting from reading...")
-					c.abort <- true
+					c.abortChan <- true
 					break OUTER
 				}
 				if netErr, ok := err.(net.Error); ok && !netErr.Timeout() {
@@ -132,14 +132,14 @@ func (c *client) writeRoutine() {
 			if err != nil {
 				if err == io.EOF {
 					log.Print("Ctrl+D detected, aborting...")
-					c.abort <- true
+					c.abortChan <- true
 					return
 				}
 				log.Println(err)
 			}
 			stdin <- s
 		}
-	}(c.stdin)
+	}(c.stdinChan)
 
 OUTER:
 	for {
@@ -152,7 +152,7 @@ OUTER:
 		STDIN:
 			for {
 				select {
-				case stdin, ok := <-c.stdin:
+				case stdin, ok := <-c.stdinChan:
 					if !ok {
 						break STDIN
 					}
