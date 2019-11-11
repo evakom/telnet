@@ -94,10 +94,10 @@ func (c *client) readFromConn() chan bool {
 	return c.abortChan
 }
 
-func (c *client) writeToConn() chan bool {
-	go c.writeRoutine()
-	return c.abortChan
-}
+//func (c *client) writeToConn() chan bool {
+//	go c.writeRoutine()
+//	return c.abortChan
+//}
 
 func (c *client) readFromWriteToConn() chan bool {
 	go c.readRoutine()

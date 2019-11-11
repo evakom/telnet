@@ -162,10 +162,11 @@ func (srv *server) startServer() {
 			break
 		}
 		answer := strings.ToUpper(message)
-		if _, err = srv.conn.Write([]byte(answer)); err != nil {
-			//log.Println(err)
-			// return if closed conn, no need error
-		}
+		_, _ = srv.conn.Write([]byte(answer))
+		//if err != nil {
+		//log.Println(err)
+		// return if closed conn, no need error
+		//}
 	}
 }
 
