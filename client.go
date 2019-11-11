@@ -22,8 +22,9 @@ import (
 // DEADLINETIME constant need for waiting user some time
 // and get some work if user is "dead"
 const (
-	DEADLINETIME = time.Millisecond * 500
-	READBUFFER   = 1024
+	DEADLINETIME    = time.Millisecond * 500
+	READBUFFER      = 1024
+	WAITBEFORECLOSE = time.Millisecond * 500
 )
 
 type client struct {
@@ -76,6 +77,15 @@ func (c *client) close() error {
 	}
 	log.Print("...closed connection")
 	log.Print("Exited.")
+	return nil
+}
+
+func (c *client) cancelReadWriteClose() error {
+	c.cancel()
+	time.Sleep(WAITBEFORECLOSE)
+	if err := c.close(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -167,6 +177,7 @@ OUTER:
 					if _, err := c.conn.Write([]byte(stdin)); err != nil {
 						log.Println(err)
 					}
+					c.lastMessage = stdin
 					// wait deadline for input
 				case <-time.After(DEADLINETIME):
 					break STDIN

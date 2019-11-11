@@ -29,11 +29,10 @@ func main() {
 	client.waitOSKill()
 
 	<-abort
-	client.cancel()
 
-	time.Sleep(time.Second) // wait deadline for every socket
-
-	if err := client.close(); err != nil {
+	if err := client.cancelReadWriteClose(); err != nil {
 		log.Fatalln("Error close client:", err)
 	}
+
+	time.Sleep(time.Second) // wait deadline for every socket
 }

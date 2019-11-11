@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,8 +29,6 @@ const (
 type server struct {
 	conn net.Conn
 }
-
-//var serverOk server
 
 func init() {
 	//f, err := os.OpenFile("client_test.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -84,11 +83,34 @@ func TestMessageFromServer(t *testing.T) {
 			"from server - %s, expected - %s", client.lastMessage, TESTMESSAGE)
 	}
 
-	client.cancel()
-	time.Sleep(CLIENTCLOSETIMEOUT)
-	_ = client.close()
+	_ = client.cancelReadWriteClose()
 	time.Sleep(CLIENTCLOSETIMEOUT)
 
+	serverOk.stopServer()
+}
+
+func TestMessageToServerCtrlD(t *testing.T) {
+	serverOk := newServer()
+	go serverOk.startServer()
+	time.Sleep(SERVERWAITSTART)
+
+	client := newClient(SERVERLISTEN, CLIENTTIMEOUT)
+	if err := client.dial(); err != nil {
+		t.Errorf("Expected successfully connected to server but got error: %s", err)
+	}
+
+	_ = client.readFromWriteToConn()
+	client.stdinChan <- TESTMESSAGE
+	time.Sleep(CLIENTREADTIMEOUT)
+
+	actual := client.lastMessage
+	expected := strings.ToUpper(TESTMESSAGE)
+	if actual != expected {
+		t.Errorf("Test message from server expected in upper case:\n"+
+			"from server - %s, actual - %s", expected, actual)
+	}
+
+	_ = client.cancelReadWriteClose()
 	serverOk.stopServer()
 }
 
@@ -103,23 +125,16 @@ func TestDisconnectFromServer(t *testing.T) {
 	}
 
 	abort := client.readFromConn()
+
 	serverOk.stopServer()
-	time.Sleep(SERVERWAITSTOP * 3)
+	time.Sleep(SERVERWAITSTOP * 2)
 
 	<-abort
-	_ = client.close()
+	_ = client.cancelReadWriteClose()
 
 	if err := client.close(); err == nil {
 		t.Error("Expected client err for closing connection but no error returned")
 	}
-}
-
-func TestMessageToServer(t *testing.T) {
-	//t.Error()
-}
-
-func TestCtrlD(t *testing.T) {
-	//t.Error()
 }
 
 func newServer() *server {
@@ -140,17 +155,17 @@ func (srv *server) startServer() {
 	}
 
 	for {
-		_, err := bufio.NewReader(srv.conn).ReadString('\n')
+		message, err := bufio.NewReader(srv.conn).ReadString('\n')
 		if err != nil && err != io.EOF {
 			//log.Println(err)
 			// return if closed conn, no need error
 			break
 		}
-		//answer := strings.ToUpper(message)
-		//if _, err = srv.conn.Write([]byte(answer)); err != nil {
-		//	log.Println(err)
-		//	// return if closed conn, no need error
-		//}
+		answer := strings.ToUpper(message)
+		if _, err = srv.conn.Write([]byte(answer)); err != nil {
+			//log.Println(err)
+			// return if closed conn, no need error
+		}
 	}
 }
 
